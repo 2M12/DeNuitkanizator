@@ -18,7 +18,7 @@ Analysis results provided by the Program are **not guaranteed** — they depend 
 
 
 The author of the Program (Mikhail, alias 2M12 / ThreatBit) is not liable for:
-* any direct, indirect, incidental, or consequential damages caused by the use or inability to use the Program;
+* any direct, indirect, accidental, moral, punitive or subsequent damage caused as a result of the use or inability to use the Program;
 * incomplete or inaccurate analysis results;
 * use of the Program to analyze files for which the user does not have proper rights.
 
