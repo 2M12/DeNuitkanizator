@@ -1,5 +1,12 @@
 # 🤔 Как внести вклад в DeNuitkanizator
 
+---
+>[!WARNING] 
+>
+> ## 🇬🇧 Not for a Russian audience
+> If you are an English audience, then read [CONTRIBUTING-en.md](https://github.com/2M12/DeNuitkanizator/blob/main/CONTRIBUTING-en.md)
+---
+
 **Спасибо за интерес к проекту!** Я приветствую любые улучшения — будь то исправление бага, новая фича или улучшение документации.
 
 
