@@ -25,7 +25,7 @@ except ImportError:
 try:
     import capstone
     from capstone import Cs, CS_ARCH_X86, CS_MODE_32, CS_MODE_64
-    from capstone.x86 import X86_OP_REG, X86_OP_IMM, X86_OP_MEM
+    from capstone.x86 import X86_OP_REG, X86_OP_IMM, X86_OP_MEM, X86_OP_INVALID
 except ImportError:
     capstone = None
     Cs = None
@@ -35,29 +35,34 @@ except ImportError:
     X86_OP_REG = None
     X86_OP_IMM = None
     X86_OP_MEM = None
+    X86_OP_INVALID = None
 
 try:
     import zstandard as zstd
+
     HAS_ZSTD = True
 except ImportError:
     HAS_ZSTD = False
 
 try:
     import lzma
+
     HAS_LZMA = True
 except ImportError:
     HAS_LZMA = False
 
 try:
     import lz4.frame
+
     HAS_LZ4 = True
 except ImportError:
     HAS_LZ4 = False
 
 from colorama import init, Fore, Back, Style
+
 init(autoreset=True)
 
-VERSION = "1.4.2"
+VERSION = "1.5"
 REPO = "github.com/2M12/DeNuitkanizator"
 GITHUB_API = "https://api.github.com/repos/2M12/DeNuitkanizator/releases/latest"
 
@@ -119,6 +124,9 @@ regsSize = [
 XMM_REGS = ['xmm0', 'xmm1', 'xmm2', 'xmm3', 'xmm4', 'xmm5', 'xmm6', 'xmm7',
             'xmm8', 'xmm9', 'xmm10', 'xmm11', 'xmm12', 'xmm13', 'xmm14', 'xmm15']
 
+YMM_REGS = ['ymm0', 'ymm1', 'ymm2', 'ymm3', 'ymm4', 'ymm5', 'ymm6', 'ymm7',
+            'ymm8', 'ymm9', 'ymm10', 'ymm11', 'ymm12', 'ymm13', 'ymm14', 'ymm15']
+
 ENVIRONMENT_H = '''#include <stdio.h>
 #include <stdint.h>
 #include <inttypes.h>
@@ -143,6 +151,15 @@ union {
     uint16_t u16[4];
     uint8_t u8[8];
 } xmm[16];
+
+union {
+    double d[4];
+    float f[8];
+    uint64_t u64[4];
+    uint32_t u32[8];
+    uint16_t u16[16];
+    uint8_t u8[32];
+} ymm[16];
 
 #define tmp8 tmp.tmp8
 #define tmp16 tmp.tmp16
@@ -175,6 +192,10 @@ union {
 
 #define BSR(v, dst) do { dst = 63 - __builtin_clzll(v); } while(0)
 #define BSF(v, dst) do { dst = __builtin_ctzll(v); } while(0)
+#define BT(v, b) ((v >> (b % 64)) & 1)
+#define BTS(v, b) v |= (1ULL << (b % 64))
+#define BTR(v, b) v &= ~(1ULL << (b % 64))
+#define BTC(v, b) v ^= (1ULL << (b % 64))
 
 typedef struct { uint64_t lo; int64_t hi; } i128_t;
 
@@ -362,9 +383,12 @@ class NuitkaDumper:
         else:
             print(f"{Back.RED}{Fore.WHITE} (Offline Mode){Style.RESET_ALL}")
         print(f"{Back.CYAN}{Fore.BLACK} INFO {Style.RESET_ALL} Repository: {REPO}")
-        print(f"{Back.CYAN}{Fore.BLACK} INFO {Style.RESET_ALL} Please read the instructions in the repository before using the program.")
-        print(f"{Back.YELLOW}{Fore.BLACK} WARNING {Style.RESET_ALL} By using this tool, you agree to the terms in EULA.md (check Repository)")
-        print(f"{Back.YELLOW}{Fore.BLACK} WARNING {Style.RESET_ALL} YARA rules, packager detection and ASM->C translation are W.I.P. Expect improvements in future updates.")
+        print(
+            f"{Back.CYAN}{Fore.BLACK} INFO {Style.RESET_ALL} Please read the instructions in the repository before using the program.")
+        print(
+            f"{Back.YELLOW}{Fore.BLACK} WARNING {Style.RESET_ALL} By using this tool, you agree to the terms in EULA.md (check Repository)")
+        print(
+            f"{Back.YELLOW}{Fore.BLACK} WARNING {Style.RESET_ALL} YARA rules, packager detection and ASM->C translation are W.I.P. Expect improvements in future updates.")
         print()
 
     def _prompt_path(self):
@@ -556,11 +580,13 @@ class NuitkaDumper:
         elif self.rsrc_entropy > 7.9 and len(self.rsrc_data) > 100000:
             self.detected_packager = "Nuitka (detected by .rsrc entropy)"
             self.detected_nuitka = True
-            self.logger.info(f"  Detected: Nuitka (high entropy .rsrc: {self.rsrc_entropy:.2f}/8.0, size: {len(self.rsrc_data):,} bytes)")
+            self.logger.info(
+                f"  Detected: Nuitka (high entropy .rsrc: {self.rsrc_entropy:.2f}/8.0, size: {len(self.rsrc_data):,} bytes)")
         elif pyinstaller_hits >= 1 and (has_python_dlls or self.has_pyobject_files):
             self.detected_packager = "PyInstaller"
             self.detected_pyinstaller = True
-            self.logger.info(f"  Detected: PyInstaller ({pyinstaller_hits} signatures matched, Python DLL: {has_python_dlls}, PyObject files: {self.has_pyobject_files})")
+            self.logger.info(
+                f"  Detected: PyInstaller ({pyinstaller_hits} signatures matched, Python DLL: {has_python_dlls}, PyObject files: {self.has_pyobject_files})")
         elif cx_freeze_hits >= 1:
             self.detected_packager = "cx_Freeze"
             self.detected_cx_freeze = True
@@ -568,7 +594,8 @@ class NuitkaDumper:
         elif pyinstaller_hits >= 1:
             self.detected_packager = "PyInstaller (low confidence)"
             self.detected_pyinstaller = True
-            self.logger.warning(f"  Detected: PyInstaller (NOT EXACTLY: signatures matched but no Python DLL and no PyObject files, low confidence)")
+            self.logger.warning(
+                f"  Detected: PyInstaller (NOT EXACTLY: signatures matched but no Python DLL and no PyObject files, low confidence)")
         else:
             self.detected_packager = "Unknown (native or other)"
             self.logger.info("  Packager not identified")
@@ -940,7 +967,8 @@ class NuitkaDumper:
         payload_dir = self.output_dir / "Dumps" / "payloads"
         decompressed_count = 0
         if self.rsrc_data and len(self.rsrc_data) > 0:
-            self.logger.info(f"  Scanning .rsrc section ({len(self.rsrc_data):,} bytes, entropy: {self.rsrc_entropy:.2f}/8.0)")
+            self.logger.info(
+                f"  Scanning .rsrc section ({len(self.rsrc_data):,} bytes, entropy: {self.rsrc_entropy:.2f}/8.0)")
             if HAS_ZSTD:
                 decompressed_count += self._try_zstd_decompress(self.rsrc_data, payload_dir)
             else:
@@ -1010,7 +1038,8 @@ class NuitkaDumper:
                             fname = payload_dir / f"zlib_decompressed_{source_name}_{offset:08x}.bin"
                             fname.write_bytes(decompressed)
                             count += 1
-                            self.logger.info(f"  [PAYLOAD ZLIB] Decompressed {len(decompressed):,} bytes at 0x{offset:08x}")
+                            self.logger.info(
+                                f"  [PAYLOAD ZLIB] Decompressed {len(decompressed):,} bytes at 0x{offset:08x}")
                             self._scan_data_for_patterns(decompressed)
                     except:
                         pass
@@ -1090,7 +1119,7 @@ class NuitkaDumper:
             gen_info.append(f"Number of sections: {len(self.pe.sections)}")
         else:
             gen_info.append(f"File type: Raw binary")
-        gen_info.append(f"File size: {len(self.data):,} bytes ({len(self.data)/1024/1024:.2f} MB)")
+        gen_info.append(f"File size: {len(self.data):,} bytes ({len(self.data) / 1024 / 1024:.2f} MB)")
         gen_info.append(f"Packager: {self.detected_packager or 'Unknown'}")
         pe_end = 0
         if self.pe:
@@ -1099,12 +1128,13 @@ class NuitkaDumper:
         payload = len(self.data) - pe_end if pe_end > 0 else len(self.data)
         if payload == 0 and self.rsrc_data:
             payload = len(self.rsrc_data)
-        gen_info.append(f"Payload size: {payload:,} bytes ({payload/1024/1024:.2f} MB)")
+        gen_info.append(f"Payload size: {payload:,} bytes ({payload / 1024 / 1024:.2f} MB)")
         gen_info.append(f"Payload compression: {str(payload < len(self.data) * 0.95).lower()}")
         if len(self.data) > 0:
             ratio = payload / len(self.data) * 100 if payload > 0 else 0
             gen_info.append(f"Compression ratio: {ratio:.1f}%")
-        gen_info.append(f"Timestamp: {datetime.datetime.fromtimestamp(self.pe.FILE_HEADER.TimeDateStamp) if self.pe else 'N/A'}")
+        gen_info.append(
+            f"Timestamp: {datetime.datetime.fromtimestamp(self.pe.FILE_HEADER.TimeDateStamp) if self.pe else 'N/A'}")
         self._write_list(info_dir / "general.txt", gen_info)
         if self.pe:
             pe_hdr = self.pe.dump_info()
@@ -1114,7 +1144,8 @@ class NuitkaDumper:
                 name = sec.Name.decode('utf-8', errors='replace').strip('\x00')
                 ent = self._calc_entropy(sec.get_data()) if sec.SizeOfRawData > 0 else 0
                 exec_flag = "EXEC" if self._is_executable_section(sec) else ""
-                sec_info.append(f"{name}: VA=0x{sec.VirtualAddress:08x} RawSize={sec.SizeOfRawData:,} VirtSize={sec.Misc_VirtualSize:,} Entropy={ent:.2f}/8.0 Rights=0x{sec.Characteristics:08x} {exec_flag}")
+                sec_info.append(
+                    f"{name}: VA=0x{sec.VirtualAddress:08x} RawSize={sec.SizeOfRawData:,} VirtSize={sec.Misc_VirtualSize:,} Entropy={ent:.2f}/8.0 Rights=0x{sec.Characteristics:08x} {exec_flag}")
             self._write_list(info_dir / "sections.txt", sec_info)
             imports = []
             if hasattr(self.pe, 'DIRECTORY_ENTRY_IMPORT'):
@@ -1158,7 +1189,8 @@ class NuitkaDumper:
         if self.detected_nuitka:
             (info_dir / "nuitka_version.txt").write_text(f"Nuitka: detected\nPackager: {self.detected_packager}")
         if self.detected_pyinstaller:
-            (info_dir / "pyinstaller_version.txt").write_text(f"PyInstaller: detected\nPackager: {self.detected_packager}")
+            (info_dir / "pyinstaller_version.txt").write_text(
+                f"PyInstaller: detected\nPackager: {self.detected_packager}")
         if self.detected_cx_freeze:
             (info_dir / "cx_freeze_version.txt").write_text(f"cx_Freeze: detected\nPackager: {self.detected_packager}")
 
@@ -1270,7 +1302,7 @@ class NuitkaDumper:
             return
         if not self.pe:
             return
-        self.logger.info("Translating disassembly to C...")
+        self.logger.info("Translating disassembly to C (recursive traversal)...")
         code_dir = self.output_dir / "Disasm" / "code"
         (code_dir / "environment.h").write_text(ENVIRONMENT_H, encoding='utf-8')
         arch_mode = self._get_arch_mode()
@@ -1283,7 +1315,8 @@ class NuitkaDumper:
                 md = Cs(CS_ARCH_X86, arch_mode)
                 md.detail = True
                 instructions = list(md.disasm(data, section.VirtualAddress + self.pe.OPTIONAL_HEADER.ImageBase))
-                cg = CGenerator(instructions, self.pe.OPTIONAL_HEADER.ImageBase if self.pe else 0, arch_mode, self.import_name_by_address)
+                cg = CGenerator(instructions, self.pe.OPTIONAL_HEADER.ImageBase if self.pe else 0, arch_mode,
+                                self.import_name_by_address)
                 c_code = cg.generate()
                 c_code = cTemplate % c_code
                 fname = code_dir / f"{name}_full.c"
@@ -1397,7 +1430,8 @@ class NuitkaDumper:
                                         for s, offsets in self._string_offsets.items():
                                             for off in offsets:
                                                 if abs(off - target_rva) < 8:
-                                                    all_xrefs.append(f"0x{insn.address:x}: {insn.mnemonic} {insn.op_str} -> STRING @ 0x{off:x}: \"{s[:60]}\"")
+                                                    all_xrefs.append(
+                                                        f"0x{insn.address:x}: {insn.mnemonic} {insn.op_str} -> STRING @ 0x{off:x}: \"{s[:60]}\"")
                 except:
                     pass
             self._write_list(xrefs_dir / "string_xrefs.txt", all_xrefs[:10000])
@@ -1585,7 +1619,8 @@ class NuitkaDumper:
             for i, s in enumerate(raw_strings_for_yara):
                 escaped = s.replace('\\', '\\\\').replace('"', '\\"')
                 selected_strings.append(f"        $str{i} = \"{escaped}\" ascii wide")
-            strings_section = "\n".join(selected_strings) if selected_strings else "        $dummy = \"DeNuitkanizator_AutoGen\" ascii"
+            strings_section = "\n".join(
+                selected_strings) if selected_strings else "        $dummy = \"DeNuitkanizator_AutoGen\" ascii"
             condition = "any of them" if selected_strings else "$dummy"
             sha256_hash = hashlib.sha256(self.data).hexdigest()
             filename = self.filepath.name
@@ -1633,7 +1668,7 @@ class NuitkaDumper:
             summary.append(f"Architecture:           {'x64' if self.pe.FILE_HEADER.Machine == 0x8664 else 'x86'}")
         else:
             summary.append(f"File type:              Raw binary")
-        summary.append(f"File size:              {len(self.data):,} bytes ({len(self.data)/1024/1024:.2f} MB)")
+        summary.append(f"File size:              {len(self.data):,} bytes ({len(self.data) / 1024 / 1024:.2f} MB)")
         pe_end = 0
         if self.pe:
             last = self.pe.sections[-1]
@@ -1641,7 +1676,7 @@ class NuitkaDumper:
         payload = len(self.data) - pe_end if pe_end > 0 else len(self.data)
         if payload == 0 and self.rsrc_data:
             payload = len(self.rsrc_data)
-        summary.append(f"Payload size:           {payload:,} bytes ({payload/1024/1024:.2f} MB)")
+        summary.append(f"Payload size:           {payload:,} bytes ({payload / 1024 / 1024:.2f} MB)")
         summary.append(f"Payload compression:    {str(payload < len(self.data) * 0.95).lower()}")
         if len(self.data) > 0:
             ratio = payload / len(self.data) * 100 if payload > 0 else 0
@@ -1713,7 +1748,7 @@ class NuitkaDumper:
         if capstone:
             summary.append(f"Disassembler:           Capstone (active)")
             summary.append(f"Full disasm:            Disasm/full/")
-            summary.append(f"C translation:          Disasm/code/")
+            summary.append(f"C translation:          Disasm/code/ (recursive)")
             summary.append(f"Functions:              Disasm/functions/function_addresses.txt")
             summary.append(f"Call graph:             Disasm/xrefs/call_graph.txt")
             summary.append(f"String xrefs:           Disasm/xrefs/string_xrefs.txt")
@@ -1736,7 +1771,8 @@ class NuitkaDumper:
         summary.append("─" * 54)
         summary.append(" WARNINGS")
         summary.append("─" * 54)
-        if not self.detected_nuitka and not self.detected_pyinstaller and self.detected_packager and self.detected_packager != "Nuitka" and self.detected_packager != "PyInstaller" and "Nuitka" not in str(self.detected_packager) and "PyInstaller" not in str(self.detected_packager):
+        if not self.detected_nuitka and not self.detected_pyinstaller and self.detected_packager and self.detected_packager != "Nuitka" and self.detected_packager != "PyInstaller" and "Nuitka" not in str(
+                self.detected_packager) and "PyInstaller" not in str(self.detected_packager):
             summary.append(f"[WARNING] Unknown packer. Detected: {self.detected_packager}")
         if self.pe:
             for sec in self.pe.sections:
@@ -1792,6 +1828,10 @@ class CGenerator:
         self.jump_places = set()
         self.translated = 0
         self.commented = 0
+        self.visited = set()
+        self.call_targets = set()
+        self.insn_by_addr = {}
+        self._build_index()
         self._build_jump_places()
 
     @property
@@ -1800,13 +1840,27 @@ class CGenerator:
         pct = (self.translated / total * 100) if total > 0 else 0
         return f"{self.translated}/{total} instructions translated ({pct:.1f}%)"
 
+    def _build_index(self):
+        for insn in self.instructions:
+            if insn.address not in self.insn_by_addr:
+                self.insn_by_addr[insn.address] = insn
+
     def _build_jump_places(self):
-        jumps = {'jmp', 'je', 'jne', 'jz', 'jnz', 'jnb', 'jb', 'jbe', 'ja', 'jae', 'jg', 'jge', 'jl', 'jle', 'jo', 'jno', 'js', 'jns', 'jp', 'jnp', 'jcxz', 'jecxz', 'loop', 'loope', 'loopne'}
+        jumps = {'jmp', 'je', 'jne', 'jz', 'jnz', 'jnb', 'jb', 'jbe', 'ja', 'jae', 'jg', 'jge', 'jl', 'jle', 'jo',
+                 'jno', 'js', 'jns', 'jp', 'jnp', 'jcxz', 'jecxz', 'loop', 'loope', 'loopne'}
         for insn in self.instructions:
             if insn.mnemonic in jumps:
                 if len(insn.operands) > 0:
                     try:
                         target = int(insn.op_str, 16)
+                        self.jump_places.add(target)
+                    except (ValueError, AttributeError):
+                        pass
+            if insn.mnemonic == 'call':
+                if len(insn.operands) > 0:
+                    try:
+                        target = int(insn.op_str, 16)
+                        self.call_targets.add(target)
                         self.jump_places.add(target)
                     except (ValueError, AttributeError):
                         pass
@@ -1823,42 +1877,173 @@ class CGenerator:
         return None
 
     def generate(self):
-        rep_prefix = None
-        for insn in self.instructions:
-            if insn.address in self.jump_places:
-                self.c_code += f'_0x{insn.address:x}:\n'
+        if not self.instructions:
+            return ''
+
+        entry_point = self.instructions[0].address
+        self._process_block(entry_point)
+
+        for target in sorted(self.call_targets):
+            if target not in self.visited:
+                self.c_code += '\n'
+                self._process_block(target)
+
+        return self.c_code
+
+    def _process_block(self, address):
+        if address in self.visited:
+            return
+        self.visited.add(address)
+
+        insn = self.insn_by_addr.get(address)
+        if not insn:
+            return
+
+        if address in self.jump_places:
+            self.c_code += f'_0x{address:x}:\n'
+
+        while insn:
             mnemonic = insn.mnemonic
-            if mnemonic in ('rep', 'repe', 'repne'):
-                rep_prefix = mnemonic
+
+            if mnemonic == 'ret':
+                self.c_code += '    goto _end;\n'
+                return
+
+            elif mnemonic == 'jmp':
+                op = insn.operands[0] if insn.operands else None
+                if op and op.type == X86_OP_MEM:
+                    iat_name = self._resolve_iat_addr(insn, op)
+                    if iat_name:
+                        self.c_code += f'    /* jmp -> {iat_name} */\n'
+                        self.commented += 1
+                        return
+                try:
+                    target = int(insn.op_str, 16)
+                    self.c_code += f'    goto _0x{target:x};\n'
+                    self.translated += 1
+                    self._process_block(target)
+                except (ValueError, AttributeError):
+                    self.c_code += f'    /* jmp {insn.op_str} */\n'
+                    self.commented += 1
+                return
+
+            elif mnemonic in ['je', 'jne', 'jz', 'jnz', 'jb', 'jbe', 'ja', 'jae', 'jg', 'jge', 'jl', 'jle', 'jo', 'jno',
+                              'js', 'jns', 'jp', 'jnp']:
+                try:
+                    target = int(insn.op_str, 16)
+                    condition = self._get_condition(mnemonic)
+                    self.c_code += f'    if({condition}) goto _0x{target:x};\n'
+                    self.translated += 1
+
+                    next_addr = insn.address + insn.size
+
+                    self._process_block(target)
+                    self._process_block(next_addr)
+                    return
+                except (ValueError, AttributeError):
+                    self.c_code += f'    /* {mnemonic} {insn.op_str} */\n'
+                    self.commented += 1
+                    return
+
+            elif mnemonic in ['loop', 'loope', 'loopne']:
+                try:
+                    target = int(insn.op_str, 16)
+                    if mnemonic == 'loop':
+                        self.c_code += f'    if(--rcx) goto _0x{target:x};\n'
+                    elif mnemonic == 'loope':
+                        self.c_code += f'    if(--rcx && zf) goto _0x{target:x};\n'
+                    else:
+                        self.c_code += f'    if(--rcx && !zf) goto _0x{target:x};\n'
+                    self.translated += 1
+
+                    next_addr = insn.address + insn.size
+                    self._process_block(target)
+                    self._process_block(next_addr)
+                    return
+                except:
+                    self.c_code += f'    /* {mnemonic} {insn.op_str} */\n'
+                    self.commented += 1
+                    return
+
+            elif mnemonic == 'call':
+                op = insn.operands[0] if insn.operands else None
+                if op:
+                    iat_name = self._resolve_iat_addr(insn, op)
+                    if iat_name:
+                        self.c_code += f'    /* call -> {iat_name} */\n'
+                        self.commented += 1
+                    else:
+                        try:
+                            target = int(insn.op_str, 16)
+                            self.c_code += f'    PUSH64((uint64_t)&&_ret_{insn.address:x}); goto _0x{target:x}; _ret_{insn.address:x}:;\n'
+                            self.translated += 1
+                            self._process_block(target)
+                        except (ValueError, AttributeError):
+                            self.c_code += f'    /* call {insn.op_str} */\n'
+                            self.commented += 1
+                else:
+                    self.c_code += '    /* call */\n'
+                    self.commented += 1
+
+                next_addr = insn.address + insn.size
+                next_insn = self.insn_by_addr.get(next_addr)
+                if next_insn:
+                    insn = next_insn
+                    continue
+                else:
+                    return
+
+            elif mnemonic in ('rep', 'repe', 'repne'):
+                next_addr = insn.address + insn.size
+                next_insn = self.insn_by_addr.get(next_addr)
+                if next_insn and next_insn.mnemonic in ('stosb', 'stosw', 'stosd', 'stosq', 'movsb', 'movsw', 'movsd',
+                                                        'movsq'):
+                    handler = self._get_rep_handler(next_insn.mnemonic, mnemonic)
+                    if handler:
+                        try:
+                            self.c_code += handler(next_insn, list(next_insn.operands))
+                            self.translated += 1
+                            insn = self.insn_by_addr.get(next_insn.address + next_insn.size)
+                            continue
+                        except:
+                            pass
                 self.c_code += f'    /* {mnemonic} */\n'
                 self.commented += 1
+                insn = next_insn
                 continue
-            if rep_prefix and mnemonic in ('stosb', 'stosw', 'stosd', 'stosq', 'movsb', 'movsw', 'movsd', 'movsq'):
-                ops = list(insn.operands)
-                handler = self._get_rep_handler(mnemonic, rep_prefix)
+
+            else:
+                handler = self._get_handler(mnemonic)
                 if handler:
+                    ops = list(insn.operands)
                     try:
                         self.c_code += handler(insn, ops)
                         self.translated += 1
-                    except:
-                        self.c_code += f'    /* rep {mnemonic} {insn.op_str} */\n'
+                    except Exception:
+                        self.c_code += f'    /* {mnemonic} {insn.op_str} */\n'
                         self.commented += 1
-                rep_prefix = None
-                continue
-            rep_prefix = None
-            handler = self._get_handler(mnemonic)
-            if handler:
-                ops = list(insn.operands)
-                try:
-                    self.c_code += handler(insn, ops)
-                    self.translated += 1
-                except Exception:
+                else:
                     self.c_code += f'    /* {mnemonic} {insn.op_str} */\n'
                     self.commented += 1
-            else:
-                self.c_code += f'    /* {mnemonic} {insn.op_str} */\n'
-                self.commented += 1
-        return self.c_code
+
+            next_addr = insn.address + insn.size
+            insn = self.insn_by_addr.get(next_addr)
+
+        return
+
+    def _get_condition(self, mnemonic):
+        conditions = {
+            'je': 'zf', 'jz': 'zf',
+            'jne': '!zf', 'jnz': '!zf',
+            'jb': 'cf', 'jae': '!cf',
+            'jbe': 'cf || zf', 'ja': '!cf && !zf',
+            'jg': '!zf && sf == of', 'jge': 'sf == of',
+            'jl': 'sf != of', 'jle': 'zf || sf != of',
+            'jo': 'of', 'jno': '!of',
+            'js': 'sf', 'jns': '!sf',
+            'jp': 'pf', 'jnp': '!pf',
+        }
+        return conditions.get(mnemonic, '?')
 
     def _get_rep_handler(self, mnemonic, rep_prefix):
         handlers = {
@@ -1904,7 +2089,8 @@ class CGenerator:
             'cmovo': self._h_cmovo, 'cmovno': self._h_cmovno, 'cmovs': self._h_cmovs, 'cmovns': self._h_cmovns,
             'cmovp': self._h_cmovp, 'cmovnp': self._h_cmovnp, 'cmovne': self._h_cmovnz,
             'nop': self._h_nop, 'int3': self._h_int3,
-            'cbw': self._h_cbw, 'cwde': self._h_cwde, 'cdqe': self._h_cdqe, 'cwd': self._h_cwd, 'cdq': self._h_cdq, 'cqo': self._h_cqo,
+            'cbw': self._h_cbw, 'cwde': self._h_cwde, 'cdqe': self._h_cdqe, 'cwd': self._h_cwd, 'cdq': self._h_cdq,
+            'cqo': self._h_cqo,
             'stosb': self._h_stosb, 'stosw': self._h_stosw, 'stosd': self._h_stosd, 'stosq': self._h_stosq,
             'movsb': self._h_movsb, 'movsw': self._h_movsw, 'movsd': self._h_movsd, 'movsq': self._h_movsq,
             'bsr': self._h_bsr, 'bsf': self._h_bsf,
@@ -1951,7 +2137,7 @@ class CGenerator:
             if not parts:
                 parts.append('0')
             addr = ''.join(parts)
-            return f'MEMORY(uint{op.size*8}_t, {addr})'
+            return f'MEMORY(uint{op.size * 8}_t, {addr})'
         return '?'
 
     def _op_to_c_val(self, insn, op):
@@ -1971,8 +2157,7 @@ class CGenerator:
     def _xmm_name(self, insn, reg_id):
         if reg_id is None:
             return ''
-        name = insn.reg_name(reg_id)
-        return name
+        return insn.reg_name(reg_id)
 
     def _xmm_idx(self, name):
         for r in XMM_REGS:
@@ -1988,12 +2173,12 @@ class CGenerator:
     def _h_movzx(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         src = self._op_to_c_val(insn, ops[1])
-        return f'    {dst} = (uint{ops[0].size*8}_t){src};\n'
+        return f'    {dst} = (uint{ops[0].size * 8}_t){src};\n'
 
     def _h_movsx(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         src = self._op_to_c_val(insn, ops[1])
-        return f'    {dst} = (int{ops[0].size*8}_t)(int{ops[1].size*8}_t){src};\n'
+        return f'    {dst} = (int{ops[0].size * 8}_t)(int{ops[1].size * 8}_t){src};\n'
 
     def _h_movaps(self, insn, ops):
         d = self._xmm_idx(self._xmm_name(insn, ops[0].reg))
@@ -2106,7 +2291,7 @@ class CGenerator:
     def _h_sar(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         src = self._op_to_c_val(insn, ops[1])
-        return f'    {dst} = (int{ops[0].size*8}_t){dst} >> {src};\n'
+        return f'    {dst} = (int{ops[0].size * 8}_t){dst} >> {src};\n'
 
     def _h_mul(self, insn, ops):
         src = self._op_to_c_val(insn, ops[0])
@@ -2117,7 +2302,7 @@ class CGenerator:
         if len(ops) == 1:
             src = self._op_to_c_val(insn, ops[0])
             s = ops[0].size * 8
-            return f'    tmp{s*2} = (int{s}_t)rax * (int{s}_t){src}; rax = (uint{s}_t)tmp{s*2}; rdx = (uint{s}_t)(tmp{s*2} >> {s});\n'
+            return f'    tmp{s * 2} = (int{s}_t)rax * (int{s}_t){src}; rax = (uint{s}_t)tmp{s * 2}; rdx = (uint{s}_t)(tmp{s * 2} >> {s});\n'
         elif len(ops) == 2:
             dst = self._op_to_c(insn, ops[0])
             src = self._op_to_c_val(insn, ops[1])
@@ -2131,12 +2316,12 @@ class CGenerator:
     def _h_div(self, insn, ops):
         src = self._op_to_c_val(insn, ops[0])
         s = ops[0].size * 8
-        return f'    rax = (uint{s}_t)(((uint{s*2}_t)rdx << {s}) | (uint{s}_t)rax) / (uint{s}_t){src}; rdx = (uint{s}_t)(((uint{s*2}_t)rdx << {s}) | (uint{s}_t)rax) % (uint{s}_t){src};\n'
+        return f'    rax = (uint{s}_t)(((uint{s * 2}_t)rdx << {s}) | (uint{s}_t)rax) / (uint{s}_t){src}; rdx = (uint{s}_t)(((uint{s * 2}_t)rdx << {s}) | (uint{s}_t)rax) % (uint{s}_t){src};\n'
 
     def _h_idiv(self, insn, ops):
         src = self._op_to_c_val(insn, ops[0])
         s = ops[0].size * 8
-        return f'    rax = (int{s}_t)(((int{s*2}_t)rdx << {s}) | (uint{s}_t)rax) / (int{s}_t){src}; rdx = (int{s}_t)(((int{s*2}_t)rdx << {s}) | (uint{s}_t)rax) % (int{s}_t){src};\n'
+        return f'    rax = (int{s}_t)(((int{s * 2}_t)rdx << {s}) | (uint{s}_t)rax) / (int{s}_t){src}; rdx = (int{s}_t)(((int{s * 2}_t)rdx << {s}) | (uint{s}_t)rax) % (int{s}_t){src};\n'
 
     def _h_cmp(self, insn, ops):
         a = self._op_to_c_val(insn, ops[0])
@@ -2294,42 +2479,55 @@ class CGenerator:
     def _h_sete(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         return f'    {dst} = zf;\n'
+
     def _h_setne(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         return f'    {dst} = !zf;\n'
+
     def _h_setb(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         return f'    {dst} = cf;\n'
+
     def _h_setbe(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         return f'    {dst} = cf || zf;\n'
+
     def _h_seta(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         return f'    {dst} = !cf && !zf;\n'
+
     def _h_setae(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         return f'    {dst} = !cf;\n'
+
     def _h_setg(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         return f'    {dst} = !zf && sf == of;\n'
+
     def _h_setge(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         return f'    {dst} = sf == of;\n'
+
     def _h_setl(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         return f'    {dst} = sf != of;\n'
+
     def _h_setle(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         return f'    {dst} = zf || sf != of;\n'
+
     def _h_seto(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         return f'    {dst} = of;\n'
+
     def _h_setno(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         return f'    {dst} = !of;\n'
+
     def _h_sets(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         return f'    {dst} = sf;\n'
+
     def _h_setns(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         return f'    {dst} = !sf;\n'
@@ -2338,62 +2536,77 @@ class CGenerator:
         dst = self._op_to_c(insn, ops[0])
         src = self._op_to_c_val(insn, ops[1])
         return f'    if(zf) {dst} = {src};\n'
+
     def _h_cmovnz(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         src = self._op_to_c_val(insn, ops[1])
         return f'    if(!zf) {dst} = {src};\n'
+
     def _h_cmovb(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         src = self._op_to_c_val(insn, ops[1])
         return f'    if(cf) {dst} = {src};\n'
+
     def _h_cmovbe(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         src = self._op_to_c_val(insn, ops[1])
         return f'    if(cf || zf) {dst} = {src};\n'
+
     def _h_cmova(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         src = self._op_to_c_val(insn, ops[1])
         return f'    if(!cf && !zf) {dst} = {src};\n'
+
     def _h_cmovae(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         src = self._op_to_c_val(insn, ops[1])
         return f'    if(!cf) {dst} = {src};\n'
+
     def _h_cmovg(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         src = self._op_to_c_val(insn, ops[1])
         return f'    if(!zf && sf == of) {dst} = {src};\n'
+
     def _h_cmovge(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         src = self._op_to_c_val(insn, ops[1])
         return f'    if(sf == of) {dst} = {src};\n'
+
     def _h_cmovl(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         src = self._op_to_c_val(insn, ops[1])
         return f'    if(sf != of) {dst} = {src};\n'
+
     def _h_cmovle(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         src = self._op_to_c_val(insn, ops[1])
         return f'    if(zf || sf != of) {dst} = {src};\n'
+
     def _h_cmovo(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         src = self._op_to_c_val(insn, ops[1])
         return f'    if(of) {dst} = {src};\n'
+
     def _h_cmovno(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         src = self._op_to_c_val(insn, ops[1])
         return f'    if(!of) {dst} = {src};\n'
+
     def _h_cmovs(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         src = self._op_to_c_val(insn, ops[1])
         return f'    if(sf) {dst} = {src};\n'
+
     def _h_cmovns(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         src = self._op_to_c_val(insn, ops[1])
         return f'    if(!sf) {dst} = {src};\n'
+
     def _h_cmovp(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         src = self._op_to_c_val(insn, ops[1])
         return f'    if(pf) {dst} = {src};\n'
+
     def _h_cmovnp(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         src = self._op_to_c_val(insn, ops[1])
@@ -2407,48 +2620,67 @@ class CGenerator:
 
     def _h_cbw(self, insn, ops):
         return '    ax = (int16_t)(int8_t)al;\n'
+
     def _h_cwde(self, insn, ops):
         return '    eax = (int32_t)(int16_t)ax;\n'
+
     def _h_cdqe(self, insn, ops):
         return '    rax = (int64_t)(int32_t)eax;\n'
+
     def _h_cwd(self, insn, ops):
         return '    dx = (int16_t)((int16_t)ax < 0 ? 0xffff : 0);\n'
+
     def _h_cdq(self, insn, ops):
         return '    edx = (int32_t)((int32_t)eax < 0 ? 0xffffffff : 0);\n'
+
     def _h_cqo(self, insn, ops):
         return '    rdx = (int64_t)((int64_t)rax < 0 ? 0xffffffffffffffff : 0);\n'
 
     def _h_stosb(self, insn, ops):
         return '    MEMORY(uint8_t, rdi) = al; rdi++;\n'
+
     def _h_stosw(self, insn, ops):
         return '    MEMORY(uint16_t, rdi) = ax; rdi += 2;\n'
+
     def _h_stosd(self, insn, ops):
         return '    MEMORY(uint32_t, rdi) = eax; rdi += 4;\n'
+
     def _h_stosq(self, insn, ops):
         return '    MEMORY(uint64_t, rdi) = rax; rdi += 8;\n'
+
     def _h_movsb(self, insn, ops):
         return '    MEMORY(uint8_t, rdi) = MEMORY(uint8_t, rsi); rdi++; rsi++;\n'
+
     def _h_movsw(self, insn, ops):
         return '    MEMORY(uint16_t, rdi) = MEMORY(uint16_t, rsi); rdi += 2; rsi += 2;\n'
+
     def _h_movsd(self, insn, ops):
         return '    MEMORY(uint32_t, rdi) = MEMORY(uint32_t, rsi); rdi += 4; rsi += 4;\n'
+
     def _h_movsq(self, insn, ops):
         return '    MEMORY(uint64_t, rdi) = MEMORY(uint64_t, rsi); rdi += 8; rsi += 8;\n'
 
     def _h_rep_stosb(self, insn, ops):
         return '    while(rcx--) { MEMORY(uint8_t, rdi) = al; rdi++; }\n'
+
     def _h_rep_stosw(self, insn, ops):
         return '    while(rcx--) { MEMORY(uint16_t, rdi) = ax; rdi += 2; }\n'
+
     def _h_rep_stosd(self, insn, ops):
         return '    while(rcx--) { MEMORY(uint32_t, rdi) = eax; rdi += 4; }\n'
+
     def _h_rep_stosq(self, insn, ops):
         return '    while(rcx--) { MEMORY(uint64_t, rdi) = rax; rdi += 8; }\n'
+
     def _h_rep_movsb(self, insn, ops):
         return '    while(rcx--) { MEMORY(uint8_t, rdi) = MEMORY(uint8_t, rsi); rdi++; rsi++; }\n'
+
     def _h_rep_movsw(self, insn, ops):
         return '    while(rcx--) { MEMORY(uint16_t, rdi) = MEMORY(uint16_t, rsi); rdi += 2; rsi += 2; }\n'
+
     def _h_rep_movsd(self, insn, ops):
         return '    while(rcx--) { MEMORY(uint32_t, rdi) = MEMORY(uint32_t, rsi); rdi += 4; rsi += 4; }\n'
+
     def _h_rep_movsq(self, insn, ops):
         return '    while(rcx--) { MEMORY(uint64_t, rdi) = MEMORY(uint64_t, rsi); rdi += 8; rsi += 8; }\n'
 
@@ -2456,6 +2688,7 @@ class CGenerator:
         dst = self._op_to_c(insn, ops[0])
         src = self._op_to_c_val(insn, ops[1])
         return f'    BSR({src}, {dst});\n'
+
     def _h_bsf(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         src = self._op_to_c_val(insn, ops[1])
@@ -2463,30 +2696,35 @@ class CGenerator:
 
     def _h_bswap(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
-        return f'    {dst} = __builtin_bswap{ops[0].size*8}({dst});\n'
+        return f'    {dst} = __builtin_bswap{ops[0].size * 8}({dst});\n'
 
     def _h_bt(self, insn, ops):
         a = self._op_to_c_val(insn, ops[0])
         b = self._op_to_c_val(insn, ops[1])
-        return f'    cf = ({a} >> ({b} % {ops[0].size*8})) & 1;\n'
+        return f'    cf = BT({a}, {b});\n'
+
     def _h_bts(self, insn, ops):
         a = self._op_to_c(insn, ops[0])
         b = self._op_to_c_val(insn, ops[1])
-        return f'    cf = ({a} >> ({b} % {ops[0].size*8})) & 1; {a} |= (1ULL << ({b} % {ops[0].size*8}));\n'
+        return f'    cf = BT({a}, {b}); BTS({a}, {b});\n'
+
     def _h_btr(self, insn, ops):
         a = self._op_to_c(insn, ops[0])
         b = self._op_to_c_val(insn, ops[1])
-        return f'    cf = ({a} >> ({b} % {ops[0].size*8})) & 1; {a} &= ~(1ULL << ({b} % {ops[0].size*8}));\n'
+        return f'    cf = BT({a}, {b}); BTR({a}, {b});\n'
+
     def _h_btc(self, insn, ops):
         a = self._op_to_c(insn, ops[0])
         b = self._op_to_c_val(insn, ops[1])
-        return f'    cf = ({a} >> ({b} % {ops[0].size*8})) & 1; {a} ^= (1ULL << ({b} % {ops[0].size*8}));\n'
+        return f'    cf = BT({a}, {b}); BTC({a}, {b});\n'
 
     def _h_xorps(self, insn, ops):
         d = self._xmm_idx(self._xmm_name(insn, ops[0].reg))
         return f'    xmm[{d}].u64 = 0; xmm[{d}+1].u64 = 0;\n'
+
     def _h_xorpd(self, insn, ops):
         return self._h_xorps(insn, ops)
+
     def _h_pxor(self, insn, ops):
         return self._h_xorps(insn, ops)
 
@@ -2494,6 +2732,7 @@ class CGenerator:
         d = self._xmm_idx(self._xmm_name(insn, ops[0].reg))
         s = self._xmm_idx(self._xmm_name(insn, ops[1].reg))
         return f'    xmm[{d}].f[0] += xmm[{s}].f[0]; xmm[{d}].f[1] += xmm[{s}].f[1];\n'
+
     def _h_addpd(self, insn, ops):
         d = self._xmm_idx(self._xmm_name(insn, ops[0].reg))
         s = self._xmm_idx(self._xmm_name(insn, ops[1].reg))
@@ -2503,6 +2742,7 @@ class CGenerator:
         d = self._xmm_idx(self._xmm_name(insn, ops[0].reg))
         s = self._xmm_idx(self._xmm_name(insn, ops[1].reg))
         return f'    xmm[{d}].f[0] *= xmm[{s}].f[0]; xmm[{d}].f[1] *= xmm[{s}].f[1];\n'
+
     def _h_mulpd(self, insn, ops):
         d = self._xmm_idx(self._xmm_name(insn, ops[0].reg))
         s = self._xmm_idx(self._xmm_name(insn, ops[1].reg))
@@ -2512,14 +2752,17 @@ class CGenerator:
         d = self._xmm_idx(self._xmm_name(insn, ops[0].reg))
         src = self._op_to_c_val(insn, ops[1])
         return f'    xmm[{d}].d = (double)(int64_t){src};\n'
+
     def _h_cvttsd2si(self, insn, ops):
         dst = self._op_to_c(insn, ops[0])
         s = self._xmm_idx(self._xmm_name(insn, ops[1].reg))
-        return f'    {dst} = (int{ops[0].size*8}_t)xmm[{s}].d;\n'
+        return f'    {dst} = (int{ops[0].size * 8}_t)xmm[{s}].d;\n'
+
     def _h_cvtsd2ss(self, insn, ops):
         d = self._xmm_idx(self._xmm_name(insn, ops[0].reg))
         s = self._xmm_idx(self._xmm_name(insn, ops[1].reg))
         return f'    xmm[{d}].f[0] = (float)xmm[{s}].d;\n'
+
     def _h_cvtss2sd(self, insn, ops):
         d = self._xmm_idx(self._xmm_name(insn, ops[0].reg))
         s = self._xmm_idx(self._xmm_name(insn, ops[1].reg))
@@ -2527,10 +2770,13 @@ class CGenerator:
 
     def _h_syscall(self, insn, ops):
         return '    /* syscall */\n'
+
     def _h_cpuid(self, insn, ops):
         return '    /* cpuid */\n'
+
     def _h_rdtsc(self, insn, ops):
         return '    /* rdtsc */\n'
+
     def _h_rdtscp(self, insn, ops):
         return '    /* rdtscp */\n'
 
@@ -2539,24 +2785,34 @@ class CGenerator:
 
     def _h_fld(self, insn, ops):
         return f'    /* fld {insn.op_str} */\n'
+
     def _h_fst(self, insn, ops):
         return f'    /* fst {insn.op_str} */\n'
+
     def _h_fstp(self, insn, ops):
         return f'    /* fstp {insn.op_str} */\n'
+
     def _h_fadd(self, insn, ops):
         return f'    /* fadd {insn.op_str} */\n'
+
     def _h_fmul(self, insn, ops):
         return f'    /* fmul {insn.op_str} */\n'
+
     def _h_fdiv(self, insn, ops):
         return f'    /* fdiv {insn.op_str} */\n'
+
     def _h_fcom(self, insn, ops):
         return f'    /* fcom {insn.op_str} */\n'
+
     def _h_fldz(self, insn, ops):
         return '    /* fldz */\n'
+
     def _h_fld1(self, insn, ops):
         return '    /* fld1 */\n'
+
     def _h_fild(self, insn, ops):
         return f'    /* fild {insn.op_str} */\n'
+
     def _h_fistp(self, insn, ops):
         return f'    /* fistp {insn.op_str} */\n'
 
@@ -2566,12 +2822,14 @@ class CGenerator:
             return f'    if(--rcx) goto _0x{target:x};\n'
         except:
             return f'    /* loop {insn.op_str} */\n'
+
     def _h_loope(self, insn, ops):
         try:
             target = int(insn.op_str, 16)
             return f'    if(--rcx && zf) goto _0x{target:x};\n'
         except:
             return f'    /* loope {insn.op_str} */\n'
+
     def _h_loopne(self, insn, ops):
         try:
             target = int(insn.op_str, 16)
