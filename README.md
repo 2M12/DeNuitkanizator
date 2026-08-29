@@ -11,7 +11,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![Nuitka](https://img.shields.io/badge/Nuitka-Analyzer-2D2D2D?style=for-the-badge&logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
-![Version](https://img.shields.io/badge/version-1.4.2-blue)
+![Version](https://img.shields.io/badge/version-1.5-blue)
 ![GitHub commit activity](https://img.shields.io/github/commit-activity/m/2M12/DeNuitkanizator?style=for-the-badge)
 ![GitHub stars](https://img.shields.io/github/stars/2M12/DeNuitkanizator?style=for-the-badge)
 ![GitHub watchers](https://img.shields.io/github/watchers/2M12/DeNuitkanizator?style=for-the-badge)
@@ -180,8 +180,8 @@ python DeNuitkanizator.py
 
 ## ☑️ Hash-суммы
 ```bash
-MD5	38250e8de81422d26b881ee3843942a5
-SHA-256	a0a7240805dd8dfca9508be8c4d4e7ff25a06496868ba37ac16a8f43be7f6633
+MD5	95dd9a29ae0bd7ff4f9421bf7b1039bb
+SHA-256	0a446375c9951fc14f5b19eb90ae0891d380dee2d494c43afaf0ec215a2dda6b
 ```
 ## 📜 Лицензия
 MIT © 2026 Mikhail (2M12) / ThreatBit
