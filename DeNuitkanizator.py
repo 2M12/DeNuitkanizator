@@ -1281,7 +1281,6 @@ class NuitkaDumper:
         self.found_bytecodes.append((ver_name, offset, f"magic_context_{safe_region}"))
 
     def _try_marshal_load(self, data, offset, ver_name, bytecode_dir):
-        """Validate a marshal code object and save a loadable .pyc."""
         for skip in (16, 12, 8, 0):
             test_offset = offset + skip
             if test_offset + 4 > len(data):
