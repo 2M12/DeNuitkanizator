@@ -3,3 +3,4 @@ colorama>=0.4.6
 capstone>=5.0.0
 zstandard>=0.22.0
 lz4>=4.3.3
+pydumpck>=0.1.0
