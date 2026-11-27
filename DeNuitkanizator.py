@@ -488,7 +488,6 @@ class NuitkaDumper:
             self.all_sections_data = self.data
 
     def _build_virtual_image(self):
-        """Build an in-memory image of the loaded PE so VA reads match runtime layout."""
         self.virtual_image = b''
         self.exec_ranges = []
         if not self.pe:
@@ -519,7 +518,6 @@ class NuitkaDumper:
             self.exec_ranges = []
 
     def read_va(self, va, size):
-        """Read up to `size` bytes from the loaded image at virtual address `va`."""
         if not self.virtual_image:
             return b''
         off = va - self.image_base
@@ -528,7 +526,6 @@ class NuitkaDumper:
         return self.virtual_image[off:off + size]
 
     def va_to_offset(self, va):
-        """Convert a virtual address to a raw file offset (or None)."""
         if not self.pe:
             return None
         try:
@@ -575,7 +572,6 @@ class NuitkaDumper:
         return (section.Characteristics & 0x20000000) != 0
 
     def _imm_target(self, insn):
-        """Static immediate branch/call target, or None."""
         if not insn.operands:
             return None
         op = insn.operands[0]
@@ -929,7 +925,6 @@ class NuitkaDumper:
 
     @staticmethod
     def _resource_type_key(type_entry):
-        """Return the RT_* integer id, or the name for custom resource types."""
         try:
             if type_entry.id is not None:
                 return type_entry.id
@@ -977,7 +972,6 @@ class NuitkaDumper:
 
     @staticmethod
     def _dib_to_bmp(dib):
-        """Prepend a BITMAPFILEHEADER to an RT_BITMAP DIB payload."""
         if len(dib) < 40:
             return None
         try:
@@ -998,7 +992,6 @@ class NuitkaDumper:
 
     @staticmethod
     def _ico_from_images(images):
-        """Build an .ico container from RT_ICON DIB/PNG payloads."""
         images = [img for img in images if img]
         if not images:
             return b''
@@ -1025,7 +1018,6 @@ class NuitkaDumper:
 
     @staticmethod
     def _group_icon_images(group_data, icon_images):
-        """Parse RT_GROUP_ICON and return the referenced RT_ICON payloads."""
         if len(group_data) < 6:
             return []
         try:
@@ -1063,7 +1055,6 @@ class NuitkaDumper:
 
     @staticmethod
     def _parse_version_info(data):
-        """Parse VS_VERSIONINFO into a readable key=value listing."""
         def align4(value):
             return (value + 3) & ~3
 
@@ -1329,7 +1320,6 @@ class NuitkaDumper:
         return dirs
 
     def _extract_pyinstaller_archive(self):
-        """Extract every entry of a verified PyInstaller CArchive."""
         info = self._pyinstaller_parse_archive()
         if not info:
             if self.PYI_MAGIC in self.data:
@@ -1425,7 +1415,6 @@ class NuitkaDumper:
 
     @classmethod
     def _pyc_with_header(cls, code_bytes, pyver=None):
-        """Turn headerless marshal data into a loadable .pyc for `pyver`."""
         for known in PYTHON_MAGICS:
             if code_bytes.startswith(known):
                 return code_bytes
@@ -1433,7 +1422,6 @@ class NuitkaDumper:
         return magic + b'\x00' * 12 + code_bytes
 
     def _extract_pyz(self, payload, out_dir):
-        """Extract modules from a PYZ archive (zlib + marshalled TOC)."""
         try:
             if payload[:4] != b'PYZ\x00' or len(payload) < 12:
                 return 0
@@ -1531,7 +1519,6 @@ class NuitkaDumper:
         self.logger.info(f"  pydumpck: {count} files in Dumps/Pyinstaller")
 
     def _extract_zip_bytecode(self):
-        """Extract .pyc files from a ZIP payload appended to the executable."""
         try:
             import zipfile
             if not zipfile.is_zipfile(str(self.filepath)):
@@ -1565,7 +1552,6 @@ class NuitkaDumper:
             self.logger.info(f"  ZIP entries extracted: {count}")
 
     def _extract_single_file_bytecode(self):
-        """Recover marshalled code objects from zlib streams in the image."""
         out_dir = self.output_dir / "Recovered" / "bytecode_decoded"
         out_dir.mkdir(parents=True, exist_ok=True)
         found = 0
@@ -1649,12 +1635,6 @@ class NuitkaDumper:
         self._write_list(self.output_dir / "Analysis" / "constants.txt", constants[:10000])
 
     def _extract_python_object_headers(self):
-        """Carve PyObject/PyTypeObject records from the image and embedded DLLs.
-
-        CPython exports and type-name tables keep strings such as
-        ``PyObject_GetAttr`` or ``PyTypeObject`` next to the object layout, so
-        the surrounding bytes are useful as memory snapshots.
-        """
         self.logger.info("Scanning for Python object headers...")
         pyobj_dir = self.output_dir / "Dumps" / "memory" / "py_objects"
         pyobj_dir.mkdir(parents=True, exist_ok=True)
@@ -1707,7 +1687,6 @@ class NuitkaDumper:
         self.logger.info(f"  Python object headers extracted: {total}")
 
     def _memory_sources(self):
-        """Yield (label, bytes, offset->VA mapper) for memory carving."""
         sources = []
         if self.data:
             sources.append(('image', self.data, self._offset_to_va))
@@ -1858,7 +1837,6 @@ class NuitkaDumper:
             self.logger.info(f"  Total payloads decompressed: {decompressed_count}")
 
     def _extract_payloads(self):
-        """Recover compressed payloads from the overlay and the whole image."""
         self._extract_nuitka_onefile_payload()
         payload_dir = self.output_dir / "Dumps" / "payloads"
         payload_dir.mkdir(parents=True, exist_ok=True)
@@ -2468,7 +2446,6 @@ class NuitkaDumper:
             return None
 
     def _mem_effective_va(self, insn, op):
-        """RIP-aware effective address of a memory operand (or None if not static)."""
         if op.type != X86_OP_MEM:
             return None
         base = op.mem.base
@@ -2615,7 +2592,6 @@ class NuitkaDumper:
         return "; ".join(comments) if comments else ""
 
     def _code_base_for(self, insn, code):
-        """Best-effort base VA of the buffer an instruction was decoded from."""
         if self.pe:
             base = self.pe.OPTIONAL_HEADER.ImageBase
             for section in self.pe.sections:
@@ -2964,7 +2940,6 @@ class CGenerator:
     }
 
     def _target_of(self, insn):
-        """Static branch target of an instruction (immediate operand only)."""
         if not insn.operands:
             return None
         op = insn.operands[0]
@@ -2973,7 +2948,6 @@ class CGenerator:
         return None
 
     def _mem_va(self, insn, op):
-        """Effective VA of a memory operand when it is statically known."""
         if op.type != X86_OP_MEM:
             return None
         if op.mem.base and insn.reg_name(op.mem.base).lower() in ('rip', 'eip'):
@@ -2983,7 +2957,6 @@ class CGenerator:
         return None
 
     def _mem_ea(self, insn, op):
-        """Return (address expression, absolute VA or None) for a memory operand."""
         base = op.mem.base
         index = op.mem.index
         scale = op.mem.scale or 1
@@ -3052,7 +3025,6 @@ class CGenerator:
         self.c_code += f'_0x{address:x}:\n'
 
     def _run_block(self, address, work):
-        """Iterative traversal of one basic block (no Python recursion)."""
         if address in self.visited_blocks:
             return
         insn = self.insn_by_addr.get(address)
@@ -4121,7 +4093,6 @@ class CVar(CExpr):
 
 
 class CAddr(CExpr):
-    """Address-of: result of LEA. `expr` is the effective address."""
     __slots__ = ('expr', 'size')
 
     def __init__(self, expr):
@@ -5452,7 +5423,6 @@ class CLifter:
 
 
 class _Conditional(CExpr):
-    """Ternary used only for cmov rendering."""
     __slots__ = ('cond', 'a', 'b', 'size')
 
     def __init__(self, cond, a, b):
@@ -5683,7 +5653,6 @@ class CPseudoProgram:
             pass
 
     def resolve_jump_table(self, insn, reg_const):
-        """Resolve a static jump table used by `jmp [base + index*scale]`."""
         try:
             if not insn.operands:
                 return None
@@ -5862,7 +5831,6 @@ def _stack_disp(expr, base):
 
 
 def _pointer_root(expr):
-    """If `expr` is a simple pointer expression, return the root variable name."""
     if isinstance(expr, CVar):
         return expr.name
     if isinstance(expr, CReg):
@@ -7137,7 +7105,6 @@ _MEM_PREFIX = {1: 'byte', 2: 'word', 4: 'dword', 8: 'qword', 16: 'xmmword'}
 
 
 def _sorted_locals(locals_dict):
-    """Sort locals by kind and stack offset (var_8, var_10, ..., arg_28)."""
     def key(item):
         name = item[0]
         prefix, _, suffix = name.partition('_')
