@@ -14,6 +14,7 @@ import shutil
 import math
 import string
 import json
+import subprocess
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -65,11 +66,12 @@ from colorama import init, Fore, Back, Style
 
 init(autoreset=True)
 
-VERSION = "1.6"
+VERSION = "1.6.1"
 REPO = "github.com/2M12/DeNuitkanizator"
 GITHUB_API = "https://api.github.com/repos/2M12/DeNuitkanizator/releases/latest"
 
 PYTHON_MAGICS = {
+    b'\x33\x0d\x0d\x0a': "3.6",
     b'\x42\x0d\x0d\x0a': "3.7",
     b'\x55\x0d\x0d\x0a': "3.8",
     b'\x61\x0d\x0d\x0a': "3.9",
@@ -311,6 +313,11 @@ class Logger:
         print(f"{Back.CYAN}{Fore.BLACK} INFO {Style.RESET_ALL} [{ts}] {msg}")
         self.log_file.write(f"[INFO] [{ts}] {msg}\n")
         self.log_file.flush()
+        
+    def debug(self, msg):
+        ts = datetime.datetime.now().strftime("%H:%M:%S")
+        self.log_file.write(f"[DEBUG] [{ts}] {msg}\n")
+        self.log_file.flush()
 
     def warning(self, msg):
         ts = datetime.datetime.now().strftime("%H:%M:%S")
@@ -377,12 +384,14 @@ class NuitkaDumper:
         self.image_base = 0
         self.exec_ranges = []
         self.pseudo_mode = 'clean'
+        self.pyinstaller_mode = 'both'
         self.clean_stats = {}
 
     def run(self):
         self._show_banner()
         target = self._prompt_path()
         self._prompt_mode()
+        self._prompt_pyinstaller_mode()
         self._init_output(target)
         self._dump_all()
         self._write_summary()
@@ -439,6 +448,31 @@ class NuitkaDumper:
         else:
             self.pseudo_mode = 'clean'
             print(f"{Back.CYAN}{Fore.BLACK} INFO {Style.RESET_ALL} Pseudocode mode: Clean (IR + CFG structuring)")
+
+    def _prompt_pyinstaller_mode(self):
+        border = f"{Fore.CYAN}╔═════════════════════════════════════════════════════════════════════════════╗{Style.RESET_ALL}"
+        bottom = f"{Fore.CYAN}╚═════════════════════════════════════════════════════════════════════════════╝{Style.RESET_ALL}"
+        line1 = f"{Fore.CYAN}║{Style.RESET_ALL} Select PyInstaller extraction mode:                                         {Fore.CYAN}║{Style.RESET_ALL}"
+        line2 = f"{Fore.CYAN}║{Style.RESET_ALL}   [1] pydumpck  - external pydumpck (+ pycdc) only                          {Fore.CYAN}║{Style.RESET_ALL}"
+        line3 = f"{Fore.CYAN}║{Style.RESET_ALL}   [2] Built-in  - internal CArchive/PYZ extractor only                      {Fore.CYAN}║{Style.RESET_ALL}"
+        line4 = f"{Fore.CYAN}║{Style.RESET_ALL}   [3] Both      - pydumpck and the built-in extractor                       {Fore.CYAN}║{Style.RESET_ALL}"
+        print(border)
+        print(line1)
+        print(line2)
+        print(line3)
+        print(line4)
+        print(bottom)
+        choice = input("> ").strip().lower()
+        os.system('cls' if os.name == 'nt' else 'clear')
+        if choice in ('1', 'pydumpck', 'pydump', 'p'):
+            self.pyinstaller_mode = 'pydumpck'
+            print(f"{Back.CYAN}{Fore.BLACK} INFO {Style.RESET_ALL} PyInstaller extraction: pydumpck only")
+        elif choice in ('2', 'builtin', 'built-in', 'internal', 'b'):
+            self.pyinstaller_mode = 'builtin'
+            print(f"{Back.CYAN}{Fore.BLACK} INFO {Style.RESET_ALL} PyInstaller extraction: built-in extractor only")
+        else:
+            self.pyinstaller_mode = 'both'
+            print(f"{Back.CYAN}{Fore.BLACK} INFO {Style.RESET_ALL} PyInstaller extraction: pydumpck + built-in extractor")
 
     def _init_output(self, target):
         target_path = Path(target)
@@ -598,8 +632,16 @@ class NuitkaDumper:
         self._dump_resources()
         self._extract_all_strings()
         self._aggressive_bytecode_search()
-        self._extract_pyinstaller_archive()
-        self._extract_with_pydumpck()
+
+        if self.pyinstaller_mode in ('builtin', 'both'):
+            self._extract_pyinstaller_archive()
+            pycdc_path = self._find_working_pycdc()
+            if pycdc_path:
+                self._decompile_with_pycdc_directly(pycdc_path)
+
+        if self.pyinstaller_mode in ('pydumpck', 'both'):
+            self._extract_with_pydumpck()
+
         self._extract_zip_bytecode()
         self._extract_single_file_bytecode()
         self._extract_frozen_modules()
@@ -1389,8 +1431,22 @@ class NuitkaDumper:
                 if typecode in (b's', b'm'):
                     target = dirs['scripts'] if typecode == b's' else dirs['modules']
                     fname = target / f'{safe}.pyc'
-                    fname.write_bytes(self._pyc_with_header(payload, pyver))
-                    written += 1
+                    try:
+                        stream = io.BytesIO(payload)
+                        obj = marshal.load(stream)
+                        if not isinstance(obj, types.CodeType):
+                            self.logger.warning(f"  Invalid bytecode type for {name}: {type(obj)}")
+                            fname.write_bytes(self._pyc_with_header(payload, pyver))
+                            written += 1
+                            continue
+                        consumed = stream.tell()
+                        clean_payload = payload[:consumed]
+                        fname.write_bytes(self._pyc_with_header(clean_payload, pyver))
+                        written += 1
+                    except Exception as e:
+                        self.logger.warning(f"  Failed to validate bytecode for {name}: {e}")
+                        fname.write_bytes(self._pyc_with_header(payload, pyver))
+                        written += 1
                 elif typecode == b'z':
                     fname = dirs['base'] / (safe if safe.endswith('.pyz') else f'{safe}.pyz')
                     fname.write_bytes(payload)
@@ -1419,6 +1475,9 @@ class NuitkaDumper:
             if code_bytes.startswith(known):
                 return code_bytes
         magic = cls._pyc_magic_for(pyver) if pyver else b'\xa7\x0d\x0d\x0a'
+
+        if pyver in ('2.7', '3.0', '3.1', '3.2', '3.3', '3.4', '3.5', '3.6'):
+            return magic + b'\x00' * 8 + code_bytes
         return magic + b'\x00' * 12 + code_bytes
 
     def _extract_pyz(self, payload, out_dir):
@@ -1458,14 +1517,93 @@ class NuitkaDumper:
                     continue
                 safe = re.sub(r'[^A-Za-z0-9._-]+', '_',
                               str(name).replace('/', '_').replace('\\', '_')).strip('._')
-                fname = out_dir / f'{safe}.pyc'
-                fname.write_bytes(pyc_magic + b'\x00' * 12 + blob)
+
+                is_valid = blob.startswith(b'\x63') or any(blob.startswith(m) for m in PYTHON_MAGICS)
+                if is_valid:
+                    fname = out_dir / f'{safe}.pyc'
+                    fname.write_bytes(pyc_magic + b'\x00' * 12 + blob)
+                else:
+                    fname = out_dir / f'{safe}.bin'
+                    fname.write_bytes(blob)
                 written += 1
             if written:
                 self.logger.info(f"    PYZ: {written} modules recovered")
             return written
         except Exception:
             return 0
+
+    @staticmethod
+    def _pycdc_search_paths():
+        exe = 'pycdc.exe' if os.name == 'nt' else 'pycdc'
+        paths = []
+        try:
+            from pydumpck.pyc_checker import lib_pycdc
+            paths.append(lib_pycdc.get_bin_path() + ('.exe' if os.name == 'nt' else ''))
+        except Exception:
+            pass
+        roots = [Path.cwd(), Path(sys.argv[0]).resolve().parent]
+        try:
+            roots.append(Path(__file__).resolve().parent)
+        except Exception:
+            pass
+        for root in roots:
+            paths.append(str(root / exe))
+        seen = set()
+        for path in paths:
+            key = os.path.normcase(os.path.abspath(path))
+            if key in seen:
+                continue
+            seen.add(key)
+            if os.path.isfile(path):
+                yield path
+
+    @staticmethod
+    def _pycdc_missing_dlls(path):
+        search_dirs = [os.path.dirname(path)]
+        search_dirs += [d for d in os.environ.get('PATH', '').split(os.pathsep) if d]
+        system_root = os.environ.get('SystemRoot', r'C:\Windows')
+        search_dirs += [os.path.join(system_root, 'System32'),
+                        os.path.join(system_root, 'SysWOW64')]
+        missing = []
+        try:
+            pe = pefile.PE(path, fast_load=True)
+            pe.parse_data_directories(
+                directories=[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_IMPORT']])
+            for entry in getattr(pe, 'DIRECTORY_ENTRY_IMPORT', []):
+                name = entry.dll.decode('utf-8', 'replace')
+                if name.lower().startswith('api-ms-win-'):
+                    continue
+                if not any(os.path.isfile(os.path.join(d, name)) for d in search_dirs):
+                    missing.append(name)
+            pe.close()
+        except Exception:
+            return []
+        return missing
+
+    def _pycdc_runnable(self, path):
+        try:
+            probe = subprocess.run([path], stdin=subprocess.DEVNULL,
+                                   stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL, timeout=20)
+        except Exception as exc:
+            return False, str(exc)
+        if probe.returncode in (0xC0000135, 0xC0000139, 0xC000007B, 0xC0000142):
+            missing = self._pycdc_missing_dlls(path)
+            if missing:
+                return False, f"missing DLLs: {', '.join(missing)}"
+            return False, f"loader error 0x{probe.returncode & 0xFFFFFFFF:08X}"
+        return True, ''
+
+    def _find_working_pycdc(self):
+        failures = []
+        for path in self._pycdc_search_paths():
+            ok, reason = self._pycdc_runnable(path)
+            if ok:
+                return path
+            failures.append((path, reason))
+        for path, reason in failures[:1]:
+            self.logger.warning(f"  pycdc cannot run: {reason} ({path})")
+        return None
 
     def _extract_with_pydumpck(self):
         if not self.pyinstaller_confirmed:
@@ -1480,18 +1618,37 @@ class NuitkaDumper:
         self.logger.info("Extracting PyInstaller contents with pydumpck...")
         root_handlers = list(logging.root.handlers)
         levels = {}
-        for name in ('pydumpck', 'sgtpyutils', 'PyInstaller'):
+        for name in ('pydumpck', 'sgtpyutils', 'PyInstaller', 'common'):
             log = logging.getLogger(name)
             levels[name] = log.level
             log.setLevel(logging.ERROR)
         plugin = []
-        try:
-            from pydumpck.pyc_checker import lib_pycdc
-            if lib_pycdc.get_bin_path() and os.path.isfile(
-                    lib_pycdc.get_bin_path() + ('.exe' if os.name == 'nt' else '')):
-                plugin = ['pycdc']
-        except Exception:
-            plugin = []
+        pycdc_path = self._find_working_pycdc()
+        if pycdc_path:
+            try:
+                from pydumpck.pyc_checker import lib_pycdc
+                lib_pycdc.tool_pycdc = pycdc_path
+            except Exception:
+                pass
+            plugin = ['pycdc']
+            self.logger.info(f"  pycdc: {pycdc_path}")
+        else:
+            self.logger.warning(
+                "  pycdc decompilation skipped; place a working pycdc.exe next to "
+                "DeNuitkanizator to produce .py files")
+            self.logger.warning(
+                "  (the bundled pycdc.exe is a debug build requiring the Visual C++ "
+                "debug runtime, which the normal VC++ redistributable does not ship)")
+        struct_headers = None
+        pyi_info = self._pyinstaller_parse_archive()
+        if pyi_info:
+            pyver = self._pyinstaller_python_version(pyi_info['python_version'])
+            magic = self._pyc_magic_for(pyver)
+
+            if pyver in ('2.7', '3.0', '3.1', '3.2', '3.3', '3.4', '3.5', '3.6'):
+                struct_headers = (magic + b'\x00' * 8).hex()
+            else:
+                struct_headers = (magic + b'\x00' * 12).hex()
         old_cwd = os.getcwd()
         try:
             dumper = CommonDump()
@@ -1504,7 +1661,7 @@ class NuitkaDumper:
                 session_timeout=900,
                 plugin=plugin,
                 decompile_file=None,
-                struct_headers=None,
+                struct_headers=struct_headers,
             )
         except SystemExit as exc:
             self.logger.warning(f"  pydumpck stopped: {exc}")
@@ -1517,6 +1674,57 @@ class NuitkaDumper:
                 logging.getLogger(name).setLevel(level)
         count = sum(len(files) for _root, _dirs, files in os.walk(out_dir))
         self.logger.info(f"  pydumpck: {count} files in Dumps/Pyinstaller")
+        decompiled = sum(1 for _root, _dirs, files in os.walk(out_dir)
+                         for f in files if f.endswith('.cdc.py'))
+        if plugin:
+            self.logger.info(f"  pydumpck: {decompiled} .pyc decompiled to .py")
+            if decompiled == 0:
+                self.logger.info(f"  pydumpck: {count} files in Dumps/Pyinstaller")
+
+        self.logger.info(f"  pydumpck: {count} files in Dumps/Pyinstaller")
+
+    def _decompile_with_pycdc_directly(self, pycdc_path):
+        self.logger.info("Decompiling recovered .pyc files with pycdc...")
+        dirs_to_scan = [
+            self.output_dir / "Recovered" / "pyinstaller" / "scripts",
+            self.output_dir / "Recovered" / "pyinstaller" / "modules",
+            self.output_dir / "Recovered" / "pyinstaller" / "pyz",
+        ]
+        total = 0
+        success = 0
+        for scan_dir in dirs_to_scan:
+            if not scan_dir.exists():
+                continue
+            for pyc_file in scan_dir.glob("*.pyc"):
+                total += 1
+                out_file = pyc_file.with_suffix('.cdc.py')
+                try:
+                    with open(out_file, 'w', encoding='utf-8') as f_out:
+                        res = subprocess.run(
+                            [pycdc_path, str(pyc_file)],
+                            stdout=f_out,
+                            stderr=subprocess.PIPE,
+                            timeout=15
+                        )
+                    if res.returncode != 0 or out_file.stat().st_size == 0:
+                        out_file.unlink(missing_ok=True)
+                        self.logger.warning(f"  pycdc failed on {pyc_file.name}")
+                    else:
+                        success += 1
+                except subprocess.TimeoutExpired:
+                    self.logger.warning(f"  pycdc timeout on {pyc_file.name}")
+                    try:
+                        out_file.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                except Exception as e:
+                    self.logger.warning(f"  pycdc error on {pyc_file.name}: {e}")
+                    try:
+                        out_file.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+        if total > 0:
+            self.logger.info(f"  pycdc: {success}/{total} files decompiled successfully")
 
     def _extract_zip_bytecode(self):
         try:
