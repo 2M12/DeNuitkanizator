@@ -178,10 +178,5 @@ python DeNuitkanizator.py
 ### Права администратора
 ### Если скачивается .py скрипт - установка нужных библиотек
 
-## ☑️ Hash-суммы
-```bash
-MD5	95dd9a29ae0bd7ff4f9421bf7b1039bb
-SHA-256	0a446375c9951fc14f5b19eb90ae0891d380dee2d494c43afaf0ec215a2dda6b
-```
 ## 📜 Лицензия
 MIT © 2026 Mikhail (2M12) / ThreatBit
